@@ -1,6 +1,6 @@
 # MiniTwit
 
-because writing todo lists is not fun
+Because writing todo lists is not fun
 
 
 ### What is MiniTwit?
@@ -13,7 +13,7 @@ A Redis and Flask powered twitter clone.
 
 2. Install dependencies:
 
-    pip install requirements.txt
+    `pip install requirements.txt`
 
 3. Now you can run the minitwit.py file with your python interpreter and the application will greet you on http://localhost:5000/.
 
