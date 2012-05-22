@@ -40,6 +40,15 @@ def get_user(user_id):
     return r.hgetall('user:%s' % user_id)
 
 
+def add_user(username, email, password):
+    """Add user with the specified credentials."""
+    user_id = 'user:%s' % username
+    r.hset(user_id, 'username', username)
+    r.hset(user_id, 'email', email)
+    r.hset(user_id, 'pw_hash',
+           generate_password_hash(password))
+
+
 def get_message(message_id):
     """Get message by id."""
     message = r.hgetall('message:%s' % message_id)
@@ -59,9 +68,7 @@ def get_messages(message_ids):
 
 def get_public_timeline_messages():
     """Get public timeline message list."""
-    print r.lrange('timeline', 0, PER_PAGE - 1)
     messages = get_messages(r.lrange('timeline', 0, PER_PAGE - 1))
-    print messages
     return messages
 
 
@@ -78,6 +85,9 @@ def add_message_to_public_timeline(message_id):
 
 
 def add_message_to_user_timeline(user_id, message_id):
+    followee_ids = get_followees(user_id)
+    for followee_id in followee_ids:
+        r.lpush('user:%s:timeline' % followee_id, message_id)
     r.lpush('user:%s:timeline' % user_id, message_id)
 
 
@@ -89,6 +99,24 @@ def push_message(author_id, text):
     r.hset(message_id, 'text', text)
     r.hset(message_id, 'pub_date', time.time())
     return _id
+
+
+def get_followees(user_id):
+    """Get list of user followers."""
+    return r.smembers('user:%s:followees' % user_id)
+
+def is_following(user1, user2):
+    return r.sismember('user:%s:followees' % user1, user2)
+
+
+def follow(user1, user2):
+    """Follow the specified user."""
+    r.sadd('user:%s:followees' % user1, user2)
+
+
+def unfollow(user1, user2):
+    """Unfollow the specified user."""
+    r.srem('user:%s:followees' % user1, user2)
 
 
 def format_datetime(timestamp):
@@ -139,9 +167,11 @@ def user_timeline(username):
         abort(404)
     followed = False
     if g.user:
-        followed = False
-    return render_template('timeline.html', messages=get_public_timeline_messages(), followed=followed,
-            profile_user=user)
+        followed = is_following(session['user_id'], username)
+    return render_template('timeline.html',
+                           messages=get_user_timeline_messages(username),
+                           followed=followed,
+                           profile_user=user)
 
 
 @app.route('/<username>/follow')
@@ -149,12 +179,10 @@ def follow_user(username):
     """Adds the current user as follower of the given user."""
     if not g.user:
         abort(401)
-    whom_id = get_user_id(username)
-    if whom_id is None:
+    user = get_user(username)
+    if not user:
         abort(404)
-    g.db.execute('insert into follower (who_id, whom_id) values (?, ?)',
-                [session['user_id'], whom_id])
-    g.db.commit()
+    follow(session['user_id'], username)
     flash('You are now following "%s"' % username)
     return redirect(url_for('user_timeline', username=username))
 
@@ -164,12 +192,10 @@ def unfollow_user(username):
     """Removes the current user as follower of the given user."""
     if not g.user:
         abort(401)
-    whom_id = get_user_id(username)
-    if whom_id is None:
+    user = get_user(username)
+    if not user:
         abort(404)
-    g.db.execute('delete from follower where who_id=? and whom_id=?',
-                [session['user_id'], whom_id])
-    g.db.commit()
+    unfollow(session['user_id'], username)
     flash('You are no longer following "%s"' % username)
     return redirect(url_for('user_timeline', username=username))
 
@@ -226,11 +252,9 @@ def register():
         elif get_user(request.form['username']):
             error = 'The username is already taken'
         else:
-            user_id = 'user:%s' % request.form['username']
-            r.hset(user_id, 'username', request.form['username'])
-            r.hset(user_id, 'email', request.form['email'])
-            r.hset(user_id, 'pw_hash',
-                   generate_password_hash(request.form['password']))
+            add_user(request.form['username'],
+                     request.form['email'],
+                     request.form['password'])
             flash('You were successfully registered and can login now')
             return redirect(url_for('login'))
     return render_template('register.html', error=error)
