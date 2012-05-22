@@ -8,24 +8,20 @@
     :copyright: (c) 2010 by Armin Ronacher.
     :license: BSD, see LICENSE for more details.
 """
-import os
+
 import minitwit
 import unittest
-import tempfile
 
 
 class MiniTwitTestCase(unittest.TestCase):
 
     def setUp(self):
-        """Before each test, set up a blank database"""
-        self.db_fd, minitwit.app.config['DATABASE'] = tempfile.mkstemp()
+        """Before each test, setup application."""
         self.app = minitwit.app.test_client()
-        minitwit.init_db()
 
     def tearDown(self):
-        """Get rid of the database again after each test."""
-        os.close(self.db_fd)
-        os.unlink(minitwit.app.config['DATABASE'])
+        """WARNING: Flush the database."""
+        minitwit.r.flushdb()
 
     # helper functions
 
@@ -95,7 +91,7 @@ class MiniTwitTestCase(unittest.TestCase):
         rv = self.login('user2', 'wrongpassword')
         assert 'Invalid username' in rv.data
 
-    def test_message_recording(self):
+    def ttest_message_recording(self):
         """Check if adding messages works"""
         self.register_and_login('foo', 'default')
         self.add_message('test message 1')
@@ -104,7 +100,7 @@ class MiniTwitTestCase(unittest.TestCase):
         assert 'test message 1' in rv.data
         assert '&lt;test message 2&gt;' in rv.data
 
-    def test_timelines(self):
+    def ttest_timelines(self):
         """Make sure that timelines work"""
         self.register_and_login('foo', 'default')
         self.add_message('the message by foo')

@@ -37,7 +37,7 @@ app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
 def get_user(user_id):
     """Get user by username."""
-    return r.hget('user:%s' % user_id)
+    return r.hgetall('user:%s' % user_id)
 
 
 def get_message(message_id):
@@ -93,14 +93,7 @@ def timeline():
     """
     if not g.user:
         return redirect(url_for('public_timeline'))
-    return render_template('timeline.html', messages=query_db('''
-        select message.*, user.* from message, user
-        where message.author_id = user.user_id and (
-            user.user_id = ? or
-            user.user_id in (select whom_id from follower
-                                    where who_id = ?))
-        order by message.pub_date desc limit ?''',
-        [session['user_id'], session['user_id'], PER_PAGE]))
+    return render_template('timeline.html', messages=get_public_timeline_messages())
 
 
 @app.route('/public')
@@ -113,21 +106,13 @@ def public_timeline():
 @app.route('/<username>')
 def user_timeline(username):
     """Display's a users tweets."""
-    profile_user = query_db('select * from user where username = ?',
-                            [username], one=True)
+    profile_user = get_user(username)
     if profile_user is None:
         abort(404)
     followed = False
     if g.user:
-        followed = query_db('''select 1 from follower where
-            follower.who_id = ? and follower.whom_id = ?''',
-            [session['user_id'], profile_user['user_id']],
-            one=True) is not None
-    return render_template('timeline.html', messages=query_db('''
-            select message.*, user.* from message, user where
-            user.user_id = message.author_id and user.user_id = ?
-            order by message.pub_date desc limit ?''',
-            [profile_user['user_id'], PER_PAGE]), followed=followed,
+        followed = False
+    return render_template('timeline.html', messages=get_public_timeline_messages(), followed=followed,
             profile_user=profile_user)
 
 
@@ -182,16 +167,15 @@ def login():
         return redirect(url_for('timeline'))
     error = None
     if request.method == 'POST':
-        user = query_db('''select * from user where
-            username = ?''', [request.form['username']], one=True)
-        if user is None:
+        user = get_user(request.form['username'])
+        if not user:
             error = 'Invalid username'
         elif not check_password_hash(user['pw_hash'],
                                      request.form['password']):
             error = 'Invalid password'
         else:
             flash('You were logged in')
-            session['user_id'] = user['user_id']
+            session['user_id'] = request.form['username']
             return redirect(url_for('timeline'))
     return render_template('login.html', error=error)
 
@@ -212,14 +196,13 @@ def register():
             error = 'You have to enter a password'
         elif request.form['password'] != request.form['password2']:
             error = 'The two passwords do not match'
-        elif get_user_id(request.form['username']) is not None:
+        elif get_user(request.form['username']):
             error = 'The username is already taken'
         else:
-            g.db.execute('''insert into user (
-                username, email, pw_hash) values (?, ?, ?)''',
-                [request.form['username'], request.form['email'],
-                 generate_password_hash(request.form['password'])])
-            g.db.commit()
+            user_id = 'user:%s' % request.form['username']
+            r.hset(user_id, 'email', request.form['email'])
+            r.hset(user_id, 'pw_hash',
+                   generate_password_hash(request.form['password']))
             flash('You were successfully registered and can login now')
             return redirect(url_for('login'))
     return render_template('register.html', error=error)
