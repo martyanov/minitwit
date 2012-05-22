@@ -85,6 +85,7 @@ def add_message_to_public_timeline(message_id):
 
 
 def add_message_to_user_timeline(user_id, message_id):
+    """Add message id to user timeline messages list."""
     followee_ids = get_followees(user_id)
     for followee_id in followee_ids:
         r.lpush('user:%s:timeline' % followee_id, message_id)
