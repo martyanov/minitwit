@@ -59,7 +59,10 @@ def get_messages(message_ids):
 
 def get_public_timeline_messages():
     """Get public timeline message list."""
-    return get_messages(r.lrange('timeline', 0, PER_PAGE - 1))
+    print r.lrange('timeline', 0, PER_PAGE - 1)
+    messages = get_messages(r.lrange('timeline', 0, PER_PAGE - 1))
+    print messages
+    return messages
 
 
 def get_user_timeline_messages(user_id):
@@ -70,12 +73,22 @@ def get_user_timeline_messages(user_id):
 
 def add_message_to_public_timeline(message_id):
     """Add message id to public timeline messages list."""
-    r.lpush('timeline' % message_id)
+    r.lpush('timeline', message_id)
     r.ltrim('timeline', 0, PER_PAGE - 1)
 
 
 def add_message_to_user_timeline(user_id, message_id):
     r.lpush('user:%s:timeline' % user_id, message_id)
+
+
+def push_message(author_id, text):
+    """Add message and return its id."""
+    _id = r.incr('message_id')
+    message_id = 'message:%s' % _id
+    r.hset(message_id, 'author_id', author_id)
+    r.hset(message_id, 'text', text)
+    r.hset(message_id, 'pub_date', time.time())
+    return _id
 
 
 def format_datetime(timestamp):
@@ -167,12 +180,9 @@ def add_message():
     if 'user_id' not in session:
         abort(401)
     if request.form['text']:
-        _id = r.incr('message_id')
-        message_id = 'message:%s' % _id
-        r.hset(message_id, 'author_id', session['user_id'])
-        r.hset(message_id, 'text', request.form['text'])
-        r.hset(message_id, 'pub_date', time.time())
-        r.lpush('user:%s:timeline' % session['user_id'], _id)
+        message_id = push_message(session['user_id'], request.form['text'])
+        add_message_to_user_timeline(session['user_id'], message_id)
+        add_message_to_public_timeline(message_id)
         flash('Your message was recorded')
     return redirect(url_for('timeline'))
 
