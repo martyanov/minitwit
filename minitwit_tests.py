@@ -91,7 +91,7 @@ class MiniTwitTestCase(unittest.TestCase):
         rv = self.login('user2', 'wrongpassword')
         assert 'Invalid username' in rv.data
 
-    def ttest_message_recording(self):
+    def test_message_recording(self):
         """Check if adding messages works"""
         self.register_and_login('foo', 'default')
         self.add_message('test message 1')

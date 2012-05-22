@@ -42,7 +42,12 @@ def get_user(user_id):
 
 def get_message(message_id):
     """Get message by id."""
-    return r.hget('message:%s' % message_id)
+    message = r.hgetall('message:%s' % message_id)
+    if message:
+        author = get_user(message['author_id'])
+        message['email'] = author['email']
+        message['username'] = author['username']
+    return message
 
 
 def get_messages(message_ids):
@@ -54,12 +59,28 @@ def get_messages(message_ids):
 
 def get_public_timeline_messages():
     """Get public timeline message list."""
-    return get_messages(r.lrange('timeline', 0, PER_PAGE))
+    return get_messages(r.lrange('timeline', 0, PER_PAGE - 1))
+
+
+def get_user_timeline_messages(user_id):
+    """Get user time line message list."""
+    message_ids = r.lrange('user:%s:timeline' % user_id, 0, PER_PAGE - 1)
+    return get_messages(message_ids)
+
+
+def add_message_to_public_timeline(message_id):
+    """Add message id to public timeline messages list."""
+    r.lpush('timeline' % message_id)
+    r.ltrim('timeline', 0, PER_PAGE - 1)
+
+
+def add_message_to_user_timeline(user_id, message_id):
+    r.lpush('user:%s:timeline' % user_id, message_id)
 
 
 def format_datetime(timestamp):
     """Format a timestamp for display."""
-    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d @ %H:%M')
+    return datetime.utcfromtimestamp(float(timestamp)).strftime('%Y-%m-%d @ %H:%M')
 
 
 def gravatar_url(email, size=80):
@@ -78,13 +99,6 @@ def before_request():
         g.user = get_user(session['user_id'])
 
 
-@app.teardown_request
-def teardown_request(exception):
-    """Closes the database again at the end of the request."""
-    if hasattr(g, 'db'):
-        g.db.close()
-
-
 @app.route('/')
 def timeline():
     """Shows a users timeline or if no user is logged in it will
@@ -93,7 +107,8 @@ def timeline():
     """
     if not g.user:
         return redirect(url_for('public_timeline'))
-    return render_template('timeline.html', messages=get_public_timeline_messages())
+    messages = get_user_timeline_messages(g.user['username'])
+    return render_template('timeline.html', messages=messages)
 
 
 @app.route('/public')
@@ -106,14 +121,14 @@ def public_timeline():
 @app.route('/<username>')
 def user_timeline(username):
     """Display's a users tweets."""
-    profile_user = get_user(username)
-    if profile_user is None:
+    user = get_user(username)
+    if not user:
         abort(404)
     followed = False
     if g.user:
         followed = False
     return render_template('timeline.html', messages=get_public_timeline_messages(), followed=followed,
-            profile_user=profile_user)
+            profile_user=user)
 
 
 @app.route('/<username>/follow')
@@ -152,10 +167,12 @@ def add_message():
     if 'user_id' not in session:
         abort(401)
     if request.form['text']:
-        g.db.execute('''insert into message (author_id, text, pub_date)
-            values (?, ?, ?)''', (session['user_id'], request.form['text'],
-                                  int(time.time())))
-        g.db.commit()
+        _id = r.incr('message_id')
+        message_id = 'message:%s' % _id
+        r.hset(message_id, 'author_id', session['user_id'])
+        r.hset(message_id, 'text', request.form['text'])
+        r.hset(message_id, 'pub_date', time.time())
+        r.lpush('user:%s:timeline' % session['user_id'], _id)
         flash('Your message was recorded')
     return redirect(url_for('timeline'))
 
@@ -175,7 +192,7 @@ def login():
             error = 'Invalid password'
         else:
             flash('You were logged in')
-            session['user_id'] = request.form['username']
+            session['user_id'] = user['username']
             return redirect(url_for('timeline'))
     return render_template('login.html', error=error)
 
@@ -200,6 +217,7 @@ def register():
             error = 'The username is already taken'
         else:
             user_id = 'user:%s' % request.form['username']
+            r.hset(user_id, 'username', request.form['username'])
             r.hset(user_id, 'email', request.form['email'])
             r.hset(user_id, 'pw_hash',
                    generate_password_hash(request.form['password']))
