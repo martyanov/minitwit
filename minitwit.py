@@ -8,24 +8,31 @@
     :copyright: (c) 2010 by Armin Ronacher.
     :license: BSD, see LICENSE for more details.
 """
-from __future__ import with_statement
+
+import os
 import time
 from sqlite3 import dbapi2 as sqlite3
 from hashlib import md5
 from datetime import datetime
 from contextlib import closing
+
 from flask import Flask, request, session, url_for, redirect, \
      render_template, abort, g, flash
 from werkzeug import check_password_hash, generate_password_hash
+import redis
 
 
-# configuration
+# Configuration
 DATABASE = '/tmp/minitwit.db'
+REDIS_URL = os.getenv('REDISTOGO_URL', 'redis://localhost')
 PER_PAGE = 30
 DEBUG = True
 SECRET_KEY = 'development key'
 
-# create our little application :)
+# Setup redis client
+redis = redis.from_url(REDIS_URL)
+
+# Create our little application :)
 app = Flask(__name__)
 app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
@@ -239,7 +246,7 @@ def logout():
     return redirect(url_for('public_timeline'))
 
 
-# add some filters to jinja
+# Add some filters to jinja
 app.jinja_env.filters['datetimeformat'] = format_datetime
 app.jinja_env.filters['gravatar'] = gravatar_url
 
