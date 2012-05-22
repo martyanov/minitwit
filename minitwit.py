@@ -21,13 +21,13 @@ import redis
 
 
 # Configuration
-REDIS_URL = os.getenv('REDISTOGO_URL', 'redis://localhost')
+REDIS_URL = os.getenv('REDISTOGO_URL', 'redis://localhost:6379')
 PER_PAGE = 30
 DEBUG = True
 SECRET_KEY = 'development key'
 
 # Setup redis client
-redis = redis.from_url(REDIS_URL)
+r = redis.from_url(REDIS_URL)
 
 # Create our little application :)
 app = Flask(__name__)
@@ -35,11 +35,26 @@ app.config.from_object(__name__)
 app.config.from_envvar('MINITWIT_SETTINGS', silent=True)
 
 
-def get_user_id(username):
-    """Convenience method to look up the id for a username."""
-    rv = g.db.execute('select user_id from user where username = ?',
-                       [username]).fetchone()
-    return rv[0] if rv else None
+def get_user(user_id):
+    """Get user by username."""
+    return r.hget('user:%s' % user_id)
+
+
+def get_message(message_id):
+    """Get message by id."""
+    return r.hget('message:%s' % message_id)
+
+
+def get_messages(message_ids):
+    """Get message list looked up by message ids."""
+    messages = []
+    for message_id in message_ids:
+        messages.append(get_message(message_id))
+    return messages
+
+def get_public_timeline_messages():
+    """Get public timeline message list."""
+    return get_messages(r.lrange('timeline', 0, PER_PAGE))
 
 
 def format_datetime(timestamp):
@@ -58,11 +73,9 @@ def before_request():
     """Make sure we are connected to the database each request and look
     up the current user so that we know he's there.
     """
-    g.db = connect_db()
     g.user = None
     if 'user_id' in session:
-        g.user = query_db('select * from user where user_id = ?',
-                          [session['user_id']], one=True)
+        g.user = get_user(session['user_id'])
 
 
 @app.teardown_request
@@ -93,10 +106,8 @@ def timeline():
 @app.route('/public')
 def public_timeline():
     """Displays the latest messages of all users."""
-    return render_template('timeline.html', messages=query_db('''
-        select message.*, user.* from message, user
-        where message.author_id = user.user_id
-        order by message.pub_date desc limit ?''', [PER_PAGE]))
+    return render_template('timeline.html',
+        messages=get_public_timeline_messages())
 
 
 @app.route('/<username>')
